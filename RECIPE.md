@@ -77,6 +77,11 @@ the sidebar between Spaces and Agents, or open it as a floating window.
 - Frames arrive faster than a slow render can keep up with. Paint only the
   newest line in each read and drop the rest, or the display lags behind
   the audio.
+- Don't trust the port: anything on this Mac can listen on 47613 while
+  RetroWave is quit. Frames with `cols`/`rows` outside 1–64, a `tiles`
+  that isn't an array or has more than `cols × rows` entries are ignored;
+  tiles out of range or with a colour that isn't six lowercase hex digits
+  are skipped; a line over 64 KiB drops the connection.
 - Decode frames with `String.fromCharCode` over the bytes in chunks; the
   lines are ASCII.
 - `overlay.close` does not close a kept window. The mod's own

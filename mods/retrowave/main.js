@@ -12,6 +12,10 @@ import net from "net";
 const DEFAULT_PORT = 47613;
 const RETRY_MS = 3000;
 const UNLIT = "#ffffff0a";
+// Limits on what a frame may ask for; anything bigger is not from RetroWave.
+const MAX_GRID = 64;
+const MAX_LINE = 65536;
+const HEX = /^[0-9a-f]{6}$/;
 
 // Frames are ASCII JSON, so bytes map straight to characters.
 function ascii(bytes) {
@@ -68,11 +72,14 @@ export default class RetroWave extends View {
           if (chunk === null) break;
           pending += ascii(chunk);
           const end = pending.lastIndexOf("\n");
-          if (end < 0) continue;
-          // Only the newest complete frame matters; older ones in the same read are skipped.
-          const latest = pending.slice(pending.lastIndexOf("\n", end - 1) + 1, end);
-          pending = pending.slice(end + 1);
-          if (this.apply(latest)) cx.notify();
+          if (end >= 0) {
+            // Only the newest complete frame matters; older ones in the same read are skipped.
+            const latest = pending.slice(pending.lastIndexOf("\n", end - 1) + 1, end);
+            pending = pending.slice(end + 1);
+            if (this.apply(latest)) cx.notify();
+          }
+          // A line this long is not a frame: drop the connection rather than buffer it.
+          if (pending.length > MAX_LINE) break;
         }
       } catch {}
       try { socket.close(); } catch {}
@@ -87,13 +94,22 @@ export default class RetroWave extends View {
   apply(line) {
     let frame;
     try { frame = JSON.parse(line); } catch { return false; }
-    if (frame.v !== 1) return false;
+    if (frame?.v !== 1) return false;
+    if (frame.idle) { this.lit.clear(); this.state = "idle"; return true; }
+    const size = (n) => Number.isInteger(n) && n >= 1 && n <= MAX_GRID;
+    if (!size(frame.cols) || !size(frame.rows) || !Array.isArray(frame.tiles)
+      || frame.tiles.length > frame.cols * frame.rows) return false;
     this.lit.clear();
-    if (frame.idle) { this.state = "idle"; return true; }
     this.state = "live";
     this.cols = frame.cols; this.rows = frame.rows;
-    for (const [col, row, hex, opacity] of frame.tiles) {
-      this.lit.set(col * this.rows + row, opacity === undefined ? `#${hex}` : `#${hex}${alpha(opacity)}`);
+    for (const tile of frame.tiles) {
+      if (!Array.isArray(tile)) continue;
+      const [col, row, hex, opacity] = tile;
+      if (!Number.isInteger(col) || col < 0 || col >= this.cols
+        || !Number.isInteger(row) || row < 0 || row >= this.rows
+        || typeof hex !== "string" || !HEX.test(hex)) continue;
+      const fade = typeof opacity === "number" ? alpha(opacity) : "";
+      this.lit.set(col * this.rows + row, `#${hex}${fade}`);
     }
     return true;
   }
